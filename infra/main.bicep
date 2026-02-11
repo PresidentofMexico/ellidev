@@ -18,6 +18,12 @@ param baseName string = 'elli'
 @description('Container image tag')
 param imageTag string = 'latest'
 
+@description('Container image name (repository name in ACR)')
+param containerImageName string = 'elli'
+
+@description('DNS name label for the container instance')
+param dnsNameLabel string = 'elli-slack-bot'
+
 @description('Number of CPU cores for the container')
 param cpuCores int = 1
 
@@ -25,8 +31,9 @@ param cpuCores int = 1
 param memoryInGb int = 2
 
 // Generate resource names based on environment
-var acrName = '${baseName}acr${environment}'
-var keyVaultName = 'kv-${baseName}-${environment}'
+// ACR name matches actual Azure resource: 'elliacr'
+var acrName = '${baseName}acr'
+var keyVaultName = 'kv-${baseName}-secrets'
 var identityName = 'id-${baseName}-${environment}'
 var containerGroupName = 'aci-${baseName}-${environment}'
 
@@ -52,7 +59,7 @@ module acr 'modules/acr.bicep' = {
   params: {
     acrName: acrName
     location: location
-    sku: environment == 'prod' ? 'Standard' : 'Basic'
+    sku: 'Basic'
     adminUserEnabled: true
     tags: tags
   }
@@ -70,9 +77,14 @@ module keyVault 'modules/keyvault.bicep' = {
   }
 }
 
+// Reference the Key Vault resource for getSecret() calls
+resource keyVaultRef 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
+  name: keyVaultName
+}
+
 // Assign Key Vault Secrets User role to the managed identity
 resource keyVaultSecretsUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(keyVault.outputs.id, identity.outputs.principalId, 'Key Vault Secrets User')
+  name: guid(resourceGroup().id, identityName, 'Key Vault Secrets User')
   scope: resourceGroup()
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6') // Key Vault Secrets User
@@ -83,7 +95,7 @@ resource keyVaultSecretsUserRole 'Microsoft.Authorization/roleAssignments@2022-0
 
 // Assign AcrPull role to the managed identity
 resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(acr.outputs.id, identity.outputs.principalId, 'AcrPull')
+  name: guid(resourceGroup().id, identityName, 'AcrPull')
   scope: resourceGroup()
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d') // AcrPull
@@ -99,15 +111,22 @@ module container 'modules/container-instance.bicep' = {
   params: {
     containerGroupName: containerGroupName
     location: location
-    containerImage: '${acr.outputs.loginServer}/${baseName}-slack-bot:${imageTag}'
-    acrName: acr.outputs.name
+    containerImage: '${acr.outputs.loginServer}/${containerImageName}:${imageTag}'
     acrLoginServer: acr.outputs.loginServer
     managedIdentityId: identity.outputs.id
-    keyVaultName: keyVault.outputs.name
     cpuCores: cpuCores
     memoryInGb: memoryInGb
     restartPolicy: 'Always'
+    dnsNameLabel: dnsNameLabel
     tags: tags
+    // Pass secrets from Key Vault to container module
+    slackBotToken: keyVaultRef.getSecret('slack-bot-token')
+    slackAppToken: keyVaultRef.getSecret('slack-app-token')
+    sfConsumerKey: keyVaultRef.getSecret('sf-consumer-key')
+    sfConsumerSecret: keyVaultRef.getSecret('sf-consumer-secret')
+    sfRefreshToken: keyVaultRef.getSecret('sf-refresh-token')
+    sfOrgId: keyVaultRef.getSecret('sf-org-id')
+    snowflakePrivKeyPath: keyVaultRef.getSecret('snowflake-priv-key-path')
   }
   dependsOn: [
     keyVaultSecretsUserRole
@@ -130,6 +149,9 @@ output keyVaultUri string = keyVault.outputs.vaultUri
 
 @description('Container Group name')
 output containerGroupName string = container.outputs.name
+
+@description('Container Group FQDN')
+output containerFqdn string = container.outputs.fqdn
 
 @description('Managed Identity name')
 output identityName string = identity.outputs.name

@@ -7,20 +7,14 @@ param containerGroupName string
 @description('Location for the container')
 param location string = resourceGroup().location
 
-@description('Container image to deploy (e.g., elliacr.azurecr.io/elli-slack-bot:latest)')
+@description('Container image to deploy (e.g., elliacr.azurecr.io/elli:latest)')
 param containerImage string
-
-@description('Name of the container registry')
-param acrName string
 
 @description('Container registry login server')
 param acrLoginServer string
 
 @description('Resource ID of the user-assigned managed identity')
 param managedIdentityId string
-
-@description('Key Vault name for secret references')
-param keyVaultName string
 
 @description('Number of CPU cores')
 param cpuCores int = 1
@@ -38,18 +32,40 @@ param memoryInGb int = 2
 ])
 param restartPolicy string = 'Always'
 
+@description('DNS name label for public IP')
+param dnsNameLabel string = 'elli-slack-bot'
+
 @description('Tags to apply to the resource')
 param tags object = {}
 
-// Reference existing Key Vault
-resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
-  name: keyVaultName
-}
+// Secrets passed from main.bicep via Key Vault getSecret()
+@secure()
+@description('Slack bot token')
+param slackBotToken string
 
-// Reference existing ACR
-resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
-  name: acrName
-}
+@secure()
+@description('Slack app token')
+param slackAppToken string
+
+@secure()
+@description('Salesforce consumer key')
+param sfConsumerKey string
+
+@secure()
+@description('Salesforce consumer secret')
+param sfConsumerSecret string
+
+@secure()
+@description('Salesforce refresh token')
+param sfRefreshToken string
+
+@secure()
+@description('Salesforce org ID')
+param sfOrgId string
+
+@secure()
+@description('Snowflake private key path')
+param snowflakePrivKeyPath string
 
 resource containerGroup 'Microsoft.ContainerInstance/containerGroups@2023-05-01' = {
   name: containerGroupName
@@ -77,79 +93,33 @@ resource containerGroup 'Microsoft.ContainerInstance/containerGroups@2023-05-01'
             // Slack Configuration (secrets from Key Vault)
             {
               name: 'SLACK_BOT_TOKEN'
-              secureValue: keyVault.getSecret('SLACK-BOT-TOKEN')
+              secureValue: slackBotToken
             }
             {
               name: 'SLACK_APP_TOKEN'
-              secureValue: keyVault.getSecret('SLACK-APP-TOKEN')
+              secureValue: slackAppToken
             }
             // Salesforce OAuth Configuration
             {
               name: 'SF_CONSUMER_KEY'
-              secureValue: keyVault.getSecret('SF-CONSUMER-KEY')
+              secureValue: sfConsumerKey
             }
             {
               name: 'SF_CONSUMER_SECRET'
-              secureValue: keyVault.getSecret('SF-CONSUMER-SECRET')
+              secureValue: sfConsumerSecret
             }
             {
               name: 'SF_REFRESH_TOKEN'
-              secureValue: keyVault.getSecret('SF-REFRESH-TOKEN')
+              secureValue: sfRefreshToken
             }
             {
-              name: 'SF_INSTANCE_URL'
-              secureValue: keyVault.getSecret('SF-INSTANCE-URL')
+              name: 'SF_ORG_ID'
+              secureValue: sfOrgId
             }
             // Snowflake Configuration
             {
-              name: 'SNOWFLAKE_ACCOUNT'
-              secureValue: keyVault.getSecret('SNOWFLAKE-ACCOUNT')
-            }
-            {
-              name: 'SNOWFLAKE_USER'
-              secureValue: keyVault.getSecret('SNOWFLAKE-USER')
-            }
-            {
-              name: 'SNOWFLAKE_DATABASE'
-              secureValue: keyVault.getSecret('SNOWFLAKE-DATABASE')
-            }
-            {
-              name: 'SNOWFLAKE_SCHEMA'
-              secureValue: keyVault.getSecret('SNOWFLAKE-SCHEMA')
-            }
-            {
-              name: 'SNOWFLAKE_WAREHOUSE'
-              secureValue: keyVault.getSecret('SNOWFLAKE-WAREHOUSE')
-            }
-            {
-              name: 'SNOWFLAKE_ROLE'
-              secureValue: keyVault.getSecret('SNOWFLAKE-ROLE')
-            }
-            // Cortex Analyst Configuration
-            {
-              name: 'CORTEX_ANALYST_PAT'
-              secureValue: keyVault.getSecret('CORTEX-ANALYST-PAT')
-            }
-            {
-              name: 'CORTEX_ANALYST_ACCOUNT'
-              secureValue: keyVault.getSecret('CORTEX-ANALYST-ACCOUNT')
-            }
-            {
-              name: 'CORTEX_ANALYST_REGION'
-              secureValue: keyVault.getSecret('CORTEX-ANALYST-REGION')
-            }
-            // Channel-Based Opportunity Configuration
-            {
-              name: 'CHANNEL_BU_MAPPING'
-              secureValue: keyVault.getSecret('CHANNEL-BU-MAPPING')
-            }
-            {
-              name: 'BU_RECORD_TYPES'
-              secureValue: keyVault.getSecret('BU-RECORD-TYPES')
-            }
-            {
-              name: 'BU_FIELD_DEFAULTS'
-              secureValue: keyVault.getSecret('BU-FIELD-DEFAULTS')
+              name: 'SNOWFLAKE_PRIVATE_KEY_PATH'
+              secureValue: snowflakePrivKeyPath
             }
             // Non-secret environment variables
             {
@@ -177,6 +147,12 @@ resource containerGroup 'Microsoft.ContainerInstance/containerGroups@2023-05-01'
               value: 'json'
             }
           ]
+          ports: [
+            {
+              port: 8000
+              protocol: 'TCP'
+            }
+          ]
         }
       }
     ]
@@ -188,10 +164,16 @@ resource containerGroup 'Microsoft.ContainerInstance/containerGroups@2023-05-01'
         identity: managedIdentityId
       }
     ]
-    // No public IP needed - Socket Mode uses outbound connections only
+    // Public IP with DNS name label and port 8000
     ipAddress: {
-      type: 'Private'
-      ports: []
+      type: 'Public'
+      dnsNameLabel: dnsNameLabel
+      ports: [
+        {
+          port: 8000
+          protocol: 'TCP'
+        }
+      ]
     }
   }
 }
@@ -201,3 +183,6 @@ output id string = containerGroup.id
 
 @description('The name of the container group')
 output name string = containerGroup.name
+
+@description('The FQDN of the container group')
+output fqdn string = containerGroup.properties.ipAddress.fqdn

@@ -7,6 +7,7 @@ This folder contains Azure Bicep templates for deploying Elli Slack Bot infrastr
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                 Azure Resource Group (rg-elli-prod)          │
+│                 Location: East US 2                          │
 │                                                              │
 │  ┌──────────────────┐                                       │
 │  │   Managed        │                                       │
@@ -18,16 +19,20 @@ This folder contains Azure Bicep templates for deploying Elli Slack Bot infrastr
 │           ▼                          User role ▼            │
 │  ┌──────────────────┐       ┌────────────────────────────┐  │
 │  │ Container        │       │      Azure Key Vault       │  │
-│  │ Registry         │       │     (kv-elli-prod)         │  │
-│  │ (elliacrprod)    │       │  - SLACK-BOT-TOKEN         │  │
-│  └────────┬─────────┘       │  - SF-REFRESH-TOKEN        │  │
-│           │                 │  - CHANNEL-BU-MAPPING      │  │
-│           │ pulls image     │  - etc.                    │  │
-│           ▼                 └────────────────────────────┘  │
-│  ┌──────────────────┐                    ▲                  │
-│  │ Container        │                    │                  │
-│  │ Instance         │────────────────────┘                  │
-│  │ (aci-elli-prod)  │  reads secrets at runtime             │
+│  │ Registry         │       │     (kv-elli-secrets)      │  │
+│  │ (elliacr)        │       │  - slack-bot-token         │  │
+│  │ SKU: Basic       │       │  - slack-app-token         │  │
+│  └────────┬─────────┘       │  - snowflake-priv-key-path │  │
+│           │                 │  - sf-org-id               │  │
+│           │ pulls image     │  - sf-consumer-key         │  │
+│           ▼                 │  - sf-consumer-secret      │  │
+│  ┌──────────────────┐       │  - sf-refresh-token        │  │
+│  │ Container        │       └────────────────────────────┘  │
+│  │ Instance         │                    ▲                  │
+│  │ (aci-elli-prod)  │────────────────────┘                  │
+│  │ DNS: elli-slack- │  reads secrets at runtime             │
+│  │ bot              │                                       │
+│  │ Port: 8000       │                                       │
 │  └──────────────────┘                                       │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -73,39 +78,24 @@ az deployment group create \
 
 ```bash
 # Slack tokens (REQUIRED)
-az keyvault secret set --vault-name kv-elli-prod --name "SLACK-BOT-TOKEN" --value "xoxb-your-token"
-az keyvault secret set --vault-name kv-elli-prod --name "SLACK-APP-TOKEN" --value "xapp-your-token"
+az keyvault secret set --vault-name kv-elli-secrets --name "slack-bot-token" --value "xoxb-your-token"
+az keyvault secret set --vault-name kv-elli-secrets --name "slack-app-token" --value "xapp-your-token"
 
 # Salesforce OAuth (REQUIRED for deal creation)
-az keyvault secret set --vault-name kv-elli-prod --name "SF-CONSUMER-KEY" --value "your-consumer-key"
-az keyvault secret set --vault-name kv-elli-prod --name "SF-CONSUMER-SECRET" --value "your-consumer-secret"
-az keyvault secret set --vault-name kv-elli-prod --name "SF-REFRESH-TOKEN" --value "your-refresh-token"
-az keyvault secret set --vault-name kv-elli-prod --name "SF-INSTANCE-URL" --value "https://eldridge.my.salesforce.com"
+az keyvault secret set --vault-name kv-elli-secrets --name "sf-consumer-key" --value "your-consumer-key"
+az keyvault secret set --vault-name kv-elli-secrets --name "sf-consumer-secret" --value "your-consumer-secret"
+az keyvault secret set --vault-name kv-elli-secrets --name "sf-refresh-token" --value "your-refresh-token"
+az keyvault secret set --vault-name kv-elli-secrets --name "sf-org-id" --value "your-org-id"
 
 # Snowflake (OPTIONAL)
-az keyvault secret set --vault-name kv-elli-prod --name "SNOWFLAKE-ACCOUNT" --value "ELDRIDGE-ECM.azure_eastus2"
-az keyvault secret set --vault-name kv-elli-prod --name "SNOWFLAKE-USER" --value "elli_service_account"
-az keyvault secret set --vault-name kv-elli-prod --name "SNOWFLAKE-DATABASE" --value "ELLI_PROD"
-az keyvault secret set --vault-name kv-elli-prod --name "SNOWFLAKE-SCHEMA" --value "PUBLIC"
-az keyvault secret set --vault-name kv-elli-prod --name "SNOWFLAKE-WAREHOUSE" --value "ELLI_XS"
-az keyvault secret set --vault-name kv-elli-prod --name "SNOWFLAKE-ROLE" --value "ELLI_READONLY"
-
-# Cortex Analyst (OPTIONAL)
-az keyvault secret set --vault-name kv-elli-prod --name "CORTEX-ANALYST-PAT" --value "your-pat"
-az keyvault secret set --vault-name kv-elli-prod --name "CORTEX-ANALYST-ACCOUNT" --value "ara18269"
-az keyvault secret set --vault-name kv-elli-prod --name "CORTEX-ANALYST-REGION" --value "east-us-2.azure"
-
-# Channel Configuration (OPTIONAL - for pilot)
-az keyvault secret set --vault-name kv-elli-prod --name "CHANNEL-BU-MAPPING" --value '{"C12345ABC":"private_credit"}'
-az keyvault secret set --vault-name kv-elli-prod --name "BU-RECORD-TYPES" --value '{"private_credit":"012xxx","default":"012yyy"}'
-az keyvault secret set --vault-name kv-elli-prod --name "BU-FIELD-DEFAULTS" --value '{"private_credit":{"Strategy__c":"Corporate Credit"}}'
+az keyvault secret set --vault-name kv-elli-secrets --name "snowflake-priv-key-path" --value "/path/to/key"
 ```
 
 ### 4. Build and Push Docker Image
 
 ```bash
 # Build image directly in ACR
-az acr build --registry elliacrprod --image elli-slack-bot:latest .
+az acr build --registry elliacr --image elli:latest .
 ```
 
 ### 5. Redeploy Container (if needed)
@@ -127,7 +117,7 @@ az container show --resource-group rg-elli-prod --name aci-elli-prod --query "in
 az container logs --resource-group rg-elli-prod --name aci-elli-prod --follow
 
 # List Key Vault secrets (names only)
-az keyvault secret list --vault-name kv-elli-prod --query "[].name" -o tsv
+az keyvault secret list --vault-name kv-elli-secrets --query "[].name" -o tsv
 ```
 
 ## Troubleshooting
@@ -149,21 +139,21 @@ az keyvault secret list --vault-name kv-elli-prod --query "[].name" -o tsv
 
 1. Verify managed identity has "AcrPull" role
 2. Check ACR login server in container config matches actual ACR name
-3. Verify image exists: `az acr repository show-tags --name elliacrprod --repository elli-slack-bot`
+3. Verify image exists: `az acr repository show-tags --name elliacr --repository elli`
 
 ## Resource Naming Convention
 
 | Resource Type | Naming Pattern | Example |
 |--------------|----------------|---------|
 | Resource Group | `rg-{app}-{env}` | `rg-elli-prod` |
-| Container Registry | `{app}acr{env}` | `elliacrprod` |
-| Key Vault | `kv-{app}-{env}` | `kv-elli-prod` |
+| Container Registry | `{app}acr` | `elliacr` |
+| Key Vault | `kv-{app}-secrets` | `kv-elli-secrets` |
 | Managed Identity | `id-{app}-{env}` | `id-elli-prod` |
 | Container Instance | `aci-{app}-{env}` | `aci-elli-prod` |
 
 ## Cost Estimate
 
 - **Container Instance**: ~$30-40/month (1 CPU, 2GB RAM, always-on)
-- **Container Registry (Standard)**: ~$5/month
+- **Container Registry (Basic)**: ~$5/month
 - **Key Vault**: ~$0.03/10,000 operations (minimal cost)
 - **Total**: ~$35-50/month
