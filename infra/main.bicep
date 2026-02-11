@@ -80,9 +80,6 @@ module keyVault 'modules/keyvault.bicep' = {
 // Reference the Key Vault resource for getSecret() calls
 resource keyVaultRef 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
   name: keyVaultName
-  dependsOn: [
-    keyVault
-  ]
 }
 
 // Assign Key Vault Secrets User role to the managed identity
