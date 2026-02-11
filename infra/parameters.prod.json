@@ -14,6 +14,12 @@
     "imageTag": {
       "value": "latest"
     },
+    "containerImageName": {
+      "value": "elli"
+    },
+    "dnsNameLabel": {
+      "value": "elli-slack-bot"
+    },
     "cpuCores": {
       "value": 1
     },
