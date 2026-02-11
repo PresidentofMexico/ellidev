@@ -1,0 +1,15 @@
+# Core Slack dependencies
+slack_bolt==1.18.0
+slack_sdk==3.27.1
+python-dotenv==1.0.0
+
+# Phase 2: Salesforce Integration
+simple-salesforce==1.12.6
+
+# Phase 3 & 5: Snowflake Cortex (AI & Vector Store)
+snowflake-connector-python[pandas]==3.6.0
+pandas==2.1.4
+
+# Phase 5: RAG and Vector Search
+numpy==1.26.3
+scikit-learn==1.4.0
